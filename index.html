@@ -5,10 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title id="page-title">Sistema de Votación Escolar</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(15px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-card {
+      animation: fadeInUp 0.5s ease-out forwards;
+    }
+  </style>
 </head>
 <body class="bg-slate-100 min-h-screen flex flex-col items-center justify-center p-4 font-sans text-slate-800">
 
-  <div class="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
+  <div class="w-full max-w-lg bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
     <!-- Encabezado Dinámico -->
     <div class="bg-indigo-600 p-6 text-white text-center">
       <h1 id="main-title" class="text-2xl font-bold tracking-tight">Elecciones Escolares</h1>
@@ -21,19 +30,37 @@
       <p class="mt-4 text-slate-500 text-sm">Cargando sistema...</p>
     </div>
 
-    <!-- Pantalla de Votación Cerrada / Resultados -->
-    <div id="closed-screen" class="hidden p-6 text-center">
-      <div class="text-4xl mb-2">🏆</div>
-      <h2 class="text-xl font-bold text-slate-800">Resultados Oficiales</h2>
-      <p class="text-slate-500 text-sm mb-4">La votación ha finalizado. Conoce a los ganadores:</p>
+    <!-- Pantalla de Espera / Votación Cerrada sin Resultados -->
+    <div id="standby-screen" class="hidden p-8 text-center animate-card">
+      <div class="text-5xl mb-3">⏳</div>
+      <h2 id="standby-title" class="text-xl font-bold text-slate-800">Votación en Espera</h2>
+      <p id="standby-message" class="text-slate-600 text-sm mt-2 leading-relaxed">
+        Las votaciones aún no han iniciado. Por favor espera instrucciones.
+      </p>
+    </div>
+
+    <!-- Pantalla de Resultados Oficiales por Grupo -->
+    <div id="results-screen" class="hidden p-6">
+      <div class="text-center mb-5 animate-card">
+        <div class="text-4xl mb-1">🏆</div>
+        <h2 class="text-xl font-bold text-slate-800">Resultados Oficiales por Grupo</h2>
+        <p class="text-slate-500 text-xs mt-1">Selecciona un salón o explora los ganadores de cada categoría</p>
+      </div>
+
+      <!-- Filtro de Grupo para Resultados -->
+      <div class="mb-4">
+        <select id="results-group-filter" onchange="renderizarResultadosGrupo()" class="w-full px-4 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50/50 text-indigo-900 font-semibold text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+          <option value="TODOS">-- Ver todos los grupos --</option>
+        </select>
+      </div>
       
-      <div id="winners-container" class="space-y-3 text-left">
-        <!-- Se llenará dinámicamente -->
+      <div id="winners-container" class="space-y-6 max-h-[60vh] overflow-y-auto pr-1">
+        <!-- Se llenará dinámicamente con animación -->
       </div>
     </div>
 
     <!-- Paso 1: Ingreso de Código o Selección de Grupo -->
-    <div id="auth-screen" class="hidden p-6">
+    <div id="auth-screen" class="hidden p-6 animate-card">
       <div id="code-input-container">
         <label class="block text-sm font-semibold text-slate-700 mb-2">Código de Acceso Único</label>
         <input type="text" id="voter-code" placeholder="Ej: 11C-001" 
@@ -55,7 +82,7 @@
     </div>
 
     <!-- Paso 2: Tarjetón de Votación -->
-    <div id="ballot-screen" class="hidden p-6">
+    <div id="ballot-screen" class="hidden p-6 animate-card">
       <div class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-5 flex justify-between items-center">
         <span class="text-xs font-semibold text-indigo-800 uppercase">Grupo / Salón:</span>
         <span id="display-group" class="text-sm font-bold text-indigo-700 bg-white px-3 py-1 rounded-lg shadow-sm"></span>
@@ -72,7 +99,7 @@
     </div>
 
     <!-- Paso 3: Confirmación Final -->
-    <div id="success-screen" class="hidden p-8 text-center">
+    <div id="success-screen" class="hidden p-8 text-center animate-card">
       <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-3xl mb-4">✓</div>
       <h2 class="text-2xl font-bold text-slate-800">¡Voto Registrado!</h2>
       <p id="success-msg" class="text-slate-600 text-sm mt-2">Tu participación ha sido guardada correctamente.</p>
@@ -94,7 +121,7 @@
         
         document.getElementById("loading").classList.add("hidden");
 
-        // Aplicar título y subtítulo desde la configuración de Sheets
+        // Aplicar textos configurables desde Sheets
         if (appData.config.titulo_eleccion) {
           document.getElementById("main-title").textContent = appData.config.titulo_eleccion;
           document.getElementById("page-title").textContent = appData.config.titulo_eleccion;
@@ -103,19 +130,33 @@
           document.getElementById("main-subtitle").textContent = appData.config.subtitulo_eleccion;
         }
 
-        // Si la votación está cerrada, mostrar resultados
-        if (appData.config.estado_votacion === "CERRADO") {
-          mostrarResultados();
+        const estado = (appData.config.estado_votacion || "").toUpperCase();
+        const mostrarRes = (appData.config.mostrar_resultados || "").toUpperCase();
+
+        // 1. Si está CERRADO y mostrar_resultados es SI -> Mostrar Ganadores
+        if (estado === "CERRADO" && mostrarRes === "SI") {
+          prepararPantallaResultados();
           return;
         }
 
+        // 2. Si está en ESPERA o CERRADO (sin mostrar resultados aún) -> Pantalla de Mensaje Configurable
+        if (estado !== "ABIERTO") {
+          document.getElementById("standby-screen").classList.remove("hidden");
+          document.getElementById("standby-title").textContent = estado === "CERRADO" ? "Votación Finalizada" : "Votación en Espera";
+          if (appData.config.mensaje_espera) {
+            document.getElementById("standby-message").textContent = appData.config.mensaje_espera;
+          }
+          return;
+        }
+
+        // 3. Si está ABIERTO -> Mostrar pantalla de ingreso
         document.getElementById("auth-screen").classList.remove("hidden");
 
-        if (appData.config.modo_votacion === "LIBRE") {
+        if ((appData.config.modo_votacion || "").toUpperCase() === "LIBRE") {
           document.getElementById("code-input-container").classList.add("hidden");
           document.getElementById("group-select-container").classList.remove("hidden");
           
-          const grupos = [...new Set(appData.candidatos.map(c => c.grupo))];
+          const grupos = [...new Set(appData.candidatos.map(c => c.grupo))].sort();
           const select = document.getElementById("voter-group-select");
           grupos.forEach(g => {
             const opt = document.createElement("option");
@@ -129,13 +170,12 @@
       }
     };
 
-    // Validación previa del código antes de abrir el tarjetón
     async function verificarYEntrar() {
       const errorEl = document.getElementById("auth-error");
       const btn = document.getElementById("auth-btn");
       errorEl.classList.add("hidden");
 
-      if (appData.config.modo_votacion === "CODIGO") {
+      if ((appData.config.modo_votacion || "").toUpperCase() === "CODIGO") {
         const codeInput = document.getElementById("voter-code").value.trim().toUpperCase();
         if (!codeInput) {
           mostrarErrorAuth("Por favor ingresa tu código único.");
@@ -221,27 +261,66 @@
       });
     }
 
-    function mostrarResultados() {
-      document.getElementById("closed-screen").classList.remove("hidden");
+    // Lógica para Resultados por Grupo
+    function prepararPantallaResultados() {
+      document.getElementById("results-screen").classList.remove("hidden");
+      const resultados = appData.resultados || {};
+      const gruposConVotos = Object.keys(resultados).sort();
+      
+      const select = document.getElementById("results-group-filter");
+      gruposConVotos.forEach(g => {
+        const opt = document.createElement("option");
+        opt.value = g;
+        opt.textContent = `Grupo / Salón: ${g}`;
+        select.appendChild(opt);
+      });
+
+      renderizarResultadosGrupo();
+    }
+
+    function renderizarResultadosGrupo() {
       const container = document.getElementById("winners-container");
       container.innerHTML = "";
-
+      const filtro = document.getElementById("results-group-filter").value;
       const resultados = appData.resultados || {};
+      const grupos = filtro === "TODOS" ? Object.keys(resultados).sort() : [filtro];
 
-      appData.categorias.forEach(cat => {
-        const res = resultados[cat] || { ganador: "Sin datos", votos: 0 };
-        const div = document.createElement("div");
-        div.className = "bg-slate-50 p-3 rounded-xl border border-slate-200 flex justify-between items-center";
-        div.innerHTML = `
-          <div>
-            <span class="text-xs font-semibold text-indigo-600 uppercase block">${cat}</span>
-            <span class="text-base font-bold text-slate-800">${res.ganador}</span>
+      if (grupos.length === 0) {
+        container.innerHTML = `<p class="text-center text-slate-500 text-sm py-4">Aún no hay votos registrados para mostrar.</p>`;
+        return;
+      }
+
+      grupos.forEach((grp, gIndex) => {
+        const grupoCard = document.createElement("div");
+        grupoCard.className = "bg-slate-50 rounded-xl border border-slate-200 overflow-hidden animate-card";
+        grupoCard.style.animationDelay = `${gIndex * 0.1}s`;
+
+        let html = `
+          <div class="bg-slate-800 text-white px-4 py-2.5 font-bold text-sm flex justify-between items-center">
+            <span>Salón / Grupo ${grp}</span>
+            <span class="text-xs font-normal text-slate-300">Ganadores</span>
           </div>
-          <div class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-xs font-bold">
-            ${res.votos} votos
-          </div>
+          <div class="p-3 space-y-2.5">
         `;
-        container.appendChild(div);
+
+        appData.categorias.forEach(cat => {
+          const info = (resultados[grp] && resultados[grp][cat]) ? resultados[grp][cat] : { ganador: "Sin votos", votos: 0 };
+          html += `
+            <div class="bg-white p-3 rounded-lg border border-slate-100 shadow-sm flex justify-between items-center">
+              <div>
+                <span class="text-[11px] font-bold text-indigo-600 uppercase tracking-wider block">${cat}</span>
+                <span class="text-sm font-bold text-slate-800">${info.ganador}</span>
+              </div>
+              <div class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap">
+                ${info.votos} ${info.votos === 1 ? 'voto' : 'votos'}
+              </div>
+            </div>
+          `;
+        });
+
+        html += `</div>`;
+        grupoCard.innerHTML = html;
+        container.appendChild(grupoCard);
       });
     }
 
