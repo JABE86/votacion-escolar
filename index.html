@@ -30,9 +30,9 @@
       <p class="mt-4 text-slate-500 text-sm">Cargando sistema...</p>
     </div>
 
-    <!-- Pantalla de Espera / Votación Cerrada sin Resultados -->
+    <!-- Pantalla de Espera o Cierre (Sin Resultados Visibles) -->
     <div id="standby-screen" class="hidden p-8 text-center animate-card">
-      <div class="text-5xl mb-3">⏳</div>
+      <div id="standby-icon" class="text-5xl mb-3">⏳</div>
       <h2 id="standby-title" class="text-xl font-bold text-slate-800">Votación en Espera</h2>
       <p id="standby-message" class="text-slate-600 text-sm mt-2 leading-relaxed">
         Las votaciones aún no han iniciado. Por favor espera instrucciones.
@@ -43,8 +43,8 @@
     <div id="results-screen" class="hidden p-6">
       <div class="text-center mb-5 animate-card">
         <div class="text-4xl mb-1">🏆</div>
-        <h2 class="text-xl font-bold text-slate-800">Resultados Oficiales por Grupo</h2>
-        <p class="text-slate-500 text-xs mt-1">Selecciona un salón o explora los ganadores de cada categoría</p>
+        <h2 class="text-xl font-bold text-slate-800">Resultados Oficiales</h2>
+        <p class="text-slate-500 text-xs mt-1">Conoce los ganadores por salón y categoría</p>
       </div>
 
       <!-- Filtro de Grupo para Resultados -->
@@ -55,7 +55,7 @@
       </div>
       
       <div id="winners-container" class="space-y-6 max-h-[60vh] overflow-y-auto pr-1">
-        <!-- Se llenará dinámicamente con animación -->
+        <!-- Se llenará dinámicamente -->
       </div>
     </div>
 
@@ -121,7 +121,6 @@
         
         document.getElementById("loading").classList.add("hidden");
 
-        // Aplicar textos configurables desde Sheets
         if (appData.config.titulo_eleccion) {
           document.getElementById("main-title").textContent = appData.config.titulo_eleccion;
           document.getElementById("page-title").textContent = appData.config.titulo_eleccion;
@@ -133,23 +132,31 @@
         const estado = (appData.config.estado_votacion || "").toUpperCase();
         const mostrarRes = (appData.config.mostrar_resultados || "").toUpperCase();
 
-        // 1. Si está CERRADO y mostrar_resultados es SI -> Mostrar Ganadores
+        // 1. Mostrar Resultados si está permitido y cerrado
         if (estado === "CERRADO" && mostrarRes === "SI") {
           prepararPantallaResultados();
           return;
         }
 
-        // 2. Si está en ESPERA o CERRADO (sin mostrar resultados aún) -> Pantalla de Mensaje Configurable
+        // 2. Pantalla de Espera o Cierre (sin resultados)
         if (estado !== "ABIERTO") {
           document.getElementById("standby-screen").classList.remove("hidden");
-          document.getElementById("standby-title").textContent = estado === "CERRADO" ? "Votación Finalizada" : "Votación en Espera";
-          if (appData.config.mensaje_espera) {
-            document.getElementById("standby-message").textContent = appData.config.mensaje_espera;
+          const esCerrado = estado === "CERRADO";
+          
+          document.getElementById("standby-icon").textContent = esCerrado ? "🔒" : "⏳";
+          document.getElementById("standby-title").textContent = esCerrado ? "Votación Finalizada" : "Votación en Espera";
+          
+          let mensajeAMostrar = "";
+          if (esCerrado) {
+            mensajeAMostrar = appData.config.mensaje_cierre || "Las votaciones han finalizado oficialmente.";
+          } else {
+            mensajeAMostrar = appData.config.mensaje_espera || "Las votaciones aún no han iniciado.";
           }
+          document.getElementById("standby-message").textContent = mensajeAMostrar;
           return;
         }
 
-        // 3. Si está ABIERTO -> Mostrar pantalla de ingreso
+        // 3. Votación Abierta
         document.getElementById("auth-screen").classList.remove("hidden");
 
         if ((appData.config.modo_votacion || "").toUpperCase() === "LIBRE") {
@@ -261,19 +268,30 @@
       });
     }
 
-    // Lógica para Resultados por Grupo
     function prepararPantallaResultados() {
       document.getElementById("results-screen").classList.remove("hidden");
       const resultados = appData.resultados || {};
       const gruposConVotos = Object.keys(resultados).sort();
       
       const select = document.getElementById("results-group-filter");
+      
+      // Opción para ver todos
+      const optTodos = document.createElement("option");
+      optTodos.value = "TODOS";
+      optTodos.textContent = "-- Ver todos los grupos --";
+      select.appendChild(optTodos);
+
       gruposConVotos.forEach(g => {
         const opt = document.createElement("option");
         opt.value = g;
         opt.textContent = `Grupo / Salón: ${g}`;
         select.appendChild(opt);
       });
+
+      // Por defecto, seleccionamos el primer grupo automáticamente si existe
+      if (gruposConVotos.length > 0) {
+        select.value = gruposConVotos[0];
+      }
 
       renderizarResultadosGrupo();
     }
@@ -285,8 +303,8 @@
       const resultados = appData.resultados || {};
       const grupos = filtro === "TODOS" ? Object.keys(resultados).sort() : [filtro];
 
-      if (grupos.length === 0) {
-        container.innerHTML = `<p class="text-center text-slate-500 text-sm py-4">Aún no hay votos registrados para mostrar.</p>`;
+      if (grupos.length === 0 || (filtro !== "TODOS" && !resultados[filtro])) {
+        container.innerHTML = `<p class="text-center text-slate-500 text-sm py-4">Aún no hay votos registrados para este grupo.</p>`;
         return;
       }
 
@@ -309,7 +327,7 @@
             <div class="bg-white p-3 rounded-lg border border-slate-100 shadow-sm flex justify-between items-center">
               <div>
                 <span class="text-[11px] font-bold text-indigo-600 uppercase tracking-wider block">${cat}</span>
-                <span class="text-sm font-bold text-slate-800">${info.ganador}</span>
+                <span class="text-base font-bold text-slate-800">${info.ganador}</span>
               </div>
               <div class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-md text-xs font-bold whitespace-nowrap">
                 ${info.votos} ${info.votos === 1 ? 'voto' : 'votos'}
@@ -361,7 +379,7 @@
         }
       } catch (err) {
         errorEl.textContent = "Ocurrió un error al enviar el voto.";
-        errorEl.classList.remove("hidden");
+        errorEl.classList.add("hidden");
         btn.disabled = false;
         btn.textContent = "Confirmar y Enviar Voto";
       }
